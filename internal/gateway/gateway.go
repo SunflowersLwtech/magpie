@@ -3702,6 +3702,15 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, from provider.Pro
 			}
 		}
 		s.trace.update(tr, func(t *Route) { t.Tries[len(t.Tries)-1] = try })
+		if call.Status >= 400 {
+			// an upstream error forgets the answerer, as a reply broken
+			// off does (#733): without it a conversation kept to a member
+			// — session, turn or cache — is sent back to that member on
+			// every request however it fails, its 402s and 429s going to
+			// the agent turn after turn until the stick goes cold or the
+			// member is rested
+			unanswered(stuck, c)
+		}
 		break
 	}
 	if len(skipped) > 0 {
