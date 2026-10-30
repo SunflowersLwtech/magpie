@@ -13442,7 +13442,9 @@ function accountQuota(data, user, capFor = () => 0, settable = null) {
     if (w.resetsAt) {
       const at = new Date(w.resetsAt);
       m.title = resetText(at, at.toLocaleString(intlLang()));
-      if (used >= 80) m.append(el("span", "aq-r", resetInText(at)));
+      // at any use, not only near the cap: which account renews first is
+      // what the seats are picked by
+      m.append(el("span", "aq-r", resetInText(at)));
     }
     const out = runsOutText(w, (at) => at.toLocaleString(intlLang()));
     if (out) m.title = tipLines(m.title, out);
@@ -18214,6 +18216,9 @@ function quotaWindows(sub) {
       if (!sub.history && at > Date.now()) r.append(" ", el("span", "", untilText(at)));
       quota.append(r);
       quota.title = sub.history ? t("Last reading {when}", { when: quotaCycleDate(w.recordedAt) }) : resetText(at, at.toLocaleString(intlLang()));
+      // in brief the line above is hidden; when it starts again stays in
+      // sight there, alone (app.css shows it only in brief)
+      if (!sub.history) quota.append(el("div", "quota-reset-brief", resetText(at) + (at > Date.now() ? " · " + untilText(at) : "")));
     }
     // how far it is from an even pace through the window, as a number
     // (fflake33 on Discord), on the reset's line
