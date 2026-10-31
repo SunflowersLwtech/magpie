@@ -944,6 +944,9 @@ body.window .field.solo { grid-column: auto; }
 @media (prefers-reduced-motion: reduce) { .quota-acct-fold svg { transition: none; } }
 .quota-windows.brief { row-gap: 5px; }
 .quota-windows.brief .quota-reset { display: none; }
+/* in brief, when each window starts again, alone, where the reset line is in full */
+.quota-reset-brief { display: none; margin-top: 3px; font-size: 10px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.quota-windows.brief .quota-reset-brief { display: block; }
 .quota-windows.brief .quota-labels { margin-bottom: 3px; }
 .subscription-account .plan { margin-left: auto; flex: none; font-size: 10.5px; color: var(--muted); text-transform: capitalize; }
 .subscription-head .plan { margin-left: auto; font-size: 10.5px; color: var(--muted); text-transform: capitalize; }
