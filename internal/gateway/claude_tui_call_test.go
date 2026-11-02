@@ -253,3 +253,41 @@ func TestClaudeTUIParallelCallsBeforeTheirMessage(t *testing.T) {
 		})
 	}
 }
+
+// Two turns in a row whose call tells the client itself, each message
+// written once its call is answered: the second message is left out as
+// the first was. The first message left out, still taken as the one left
+// out, made the second look like a message written after a call it
+// didn't have: its call was given up on, and the second message told the
+// client whole, its call a second time, which the client ran again.
+func TestClaudeTUICallsBeforeTheirMessagesTwoTurns(t *testing.T) {
+	c := newTUICalls(t)
+	first := c.run.segment
+	c.call("toolu_a", `{"p":1}`)
+	if _, calls, _, _, raw := c.reply(first); len(calls) != 1 || calls[0] != `toolu_a{"p":1}` {
+		t.Fatalf("first reply %v:\n%s", calls, raw)
+	}
+	seg := c.answer("toolu_a")
+	c.write(
+		tuiRow("msg_late1", `{"type":"thinking","thinking":"first look","signature":"sig"}`, "tool_use", 40),
+		tuiRow("msg_late1", tuiCall("toolu_a", 1), "tool_use", 40),
+	)
+	c.call("toolu_b", `{"p":2}`)
+	if _, calls, _, _, raw := c.reply(seg); len(calls) != 1 || calls[0] != `toolu_b{"p":2}` || strings.Contains(raw, "first look") {
+		t.Fatalf("second reply %v:\n%s", calls, raw)
+	}
+	seg = c.answer("toolu_b")
+	c.write(
+		tuiRow("msg_late2", `{"type":"thinking","thinking":"second look","signature":"sig"}`, "tool_use", 30),
+		tuiRow("msg_late2", tuiCall("toolu_b", 2), "tool_use", 30),
+		tuiRow("msg_ans", `{"type":"text","text":"done"}`, "end_turn", 7),
+		tuiDone,
+	)
+	text, calls, stop, out, raw := c.reply(seg)
+	if len(calls) != 0 || strings.Contains(raw, "second look") {
+		t.Fatalf("third reply told toolu_b again %v:\n%s", calls, raw)
+	}
+	if text != "done" || stop != "end_turn" || out != 37 {
+		t.Fatalf("third reply %q %q %d, not done with the second message's 30 and the answer's 7:\n%s", text, stop, out, raw)
+	}
+}
