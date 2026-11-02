@@ -291,3 +291,38 @@ func TestClaudeTUICallsBeforeTheirMessagesTwoTurns(t *testing.T) {
 		t.Fatalf("third reply %q %q %d, not done with the second message's 30 and the answer's 7:\n%s", text, stop, out, raw)
 	}
 }
+
+// The next turn's message written while its call waits on the client, so
+// no reply is open, with a call in it not made yet. The message left out
+// before it made this one look like one written after calls it didn't
+// have: told whole with no reply to hear it, it marked the call not made
+// yet as told, and when that call came the client never heard of it.
+func TestClaudeTUIMessageWrittenWhileItsCallWaits(t *testing.T) {
+	c := newTUICalls(t)
+	first := c.run.segment
+	c.call("toolu_a", `{"p":1}`)
+	if _, calls, _, _, raw := c.reply(first); len(calls) != 1 || calls[0] != `toolu_a{"p":1}` {
+		t.Fatalf("first reply %v:\n%s", calls, raw)
+	}
+	seg := c.answer("toolu_a")
+	c.write(tuiRow("msg_late1", tuiCall("toolu_a", 1), "tool_use", 40))
+	c.call("toolu_b", `{"p":2}`)
+	if _, calls, _, _, raw := c.reply(seg); len(calls) != 1 || calls[0] != `toolu_b{"p":2}` {
+		t.Fatalf("second reply %v:\n%s", calls, raw)
+	}
+	c.write(
+		tuiRow("msg_late2", tuiCall("toolu_b", 2), "tool_use", 30),
+		tuiRow("msg_late2", tuiCall("toolu_c", 3), "tool_use", 30),
+		`{}`, // read only once the rows before it are done with
+	)
+	seg = c.answer("toolu_b")
+	c.call("toolu_c", `{"p":3}`)
+	if _, calls, _, _, raw := c.reply(seg); len(calls) != 1 || calls[0] != `toolu_c{"p":3}` {
+		t.Fatalf("third reply %v:\n%s", calls, raw)
+	}
+	seg = c.answer("toolu_c")
+	c.write(tuiRow("msg_ans", `{"type":"text","text":"done"}`, "end_turn", 7), tuiDone)
+	if text, calls, stop, _, raw := c.reply(seg); text != "done" || len(calls) != 0 || stop != "end_turn" {
+		t.Fatalf("last reply %q %v %q:\n%s", text, calls, stop, raw)
+	}
+}
