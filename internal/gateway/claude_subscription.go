@@ -2573,6 +2573,7 @@ func (r *subscriptionRun) readOutput(rd io.Reader) {
 	awaited := map[string]bool{} // calls told by themselves, their message not written yet
 	written := map[string]bool{} // calls in a message left out, not made yet
 	lateID := ""                 // the message left out
+	owed := map[string]bool{}    // the calls awaited as it began, which it was to have
 	over := false                // the output has ended
 	if r.tui {
 		r.mu.Lock()
@@ -2801,13 +2802,37 @@ func (r *subscriptionRun) readOutput(rd io.Reader) {
 				return
 			}
 			if whole.ID != lateID && whole.ID != unstreamed {
-				if lateID != "" && len(awaited) > 0 {
-					log.Printf("claude: %d calls told by themselves were not in the message written after them", len(awaited))
+				// Only the calls the message left out was to have are
+				// given up on: one told by itself since waits for this
+				// message, the first written after it. The message left
+				// out an earlier turn isn't this one's: taken for it,
+				// its calls were dropped from those awaited and this
+				// message told the client whole, its calls a second
+				// time, which the client ran again.
+				missing := 0
+				for id := range owed {
+					if awaited[id] {
+						delete(awaited, id)
+						missing++
+					}
+				}
+				// A message that ends the turn called nothing, so none of
+				// those awaited will be written: left out, it would be lost,
+				// and nothing else would end the reply.
+				if whole.StopReason == "end_turn" || whole.StopReason == "stop_sequence" {
+					missing += len(awaited)
 					clear(awaited)
 				}
+				if missing > 0 {
+					log.Printf("claude: %d calls told by themselves were not in the message written after them", missing)
+				}
+				clear(owed)
 				lateID = ""
 				if len(awaited) > 0 {
 					lateID = whole.ID
+					for id := range awaited {
+						owed[id] = true
+					}
 				}
 			}
 			if whole.ID == lateID {
