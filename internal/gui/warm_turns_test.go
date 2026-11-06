@@ -3,6 +3,7 @@ package gui
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,7 +17,9 @@ func TestColdTurnsTaken(t *testing.T) {
 	coldTurns.over.Store(false)
 	t.Cleanup(func() { coldTurnsTaken = false; coldTurns.over.Store(false) })
 	var inStep, inPage, both atomic.Int32
-	asked, release := make(chan struct{}), make(chan struct{})
+	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
 	page := coldTurn(func(http.ResponseWriter, *http.Request) {
 		inPage.Add(1)
 		if inStep.Load() > 0 {
@@ -33,7 +36,7 @@ func TestColdTurnsTaken(t *testing.T) {
 		warmUp(func() {
 			inStep.Add(1)
 			defer inStep.Add(-1)
-			<-asked
+			close(started)
 			<-release
 		}, func() {
 			inStep.Add(1)
@@ -45,7 +48,7 @@ func TestColdTurnsTaken(t *testing.T) {
 	}()
 	answered := make(chan struct{})
 	go func() {
-		close(asked)
+		<-started
 		ask()
 		close(answered)
 	}()
@@ -54,7 +57,7 @@ func TestColdTurnsTaken(t *testing.T) {
 		t.Fatal("the page was answered while the warm-up's step read")
 	case <-time.After(50 * time.Millisecond):
 	}
-	close(release)
+	releaseOnce.Do(func() { close(release) })
 	<-answered
 	<-warmed
 	if both.Load() != 0 {
