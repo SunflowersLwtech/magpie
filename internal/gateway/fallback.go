@@ -1642,6 +1642,22 @@ func passing(status int, header http.Header, body []byte, again int) (time.Durat
 	return 0, false
 }
 
+// hostCutAfter is how long a try has run when a plugin host lost under
+// it is no longer asked again: one lost at once (a host that died as it
+// started) is, as before.
+var hostCutAfter = time.Minute
+
+// hostLostWords are the plugin host's own words for a host lost under a
+// call (internal/plugin: writing to it failed, it quit, it was gone),
+// which a plugin's failed request reaches the gateway with.
+var hostLostWords = regexp.MustCompile(`writing to the plugin host|the plugin host quit|the plugin host is gone`)
+
+// hostCut says whether a try that ran ran failed for its plugin host
+// lost under it after hostCutAfter.
+func hostCut(body []byte, ran time.Duration) bool {
+	return ran >= hostCutAfter && hostLostWords.Match(body)
+}
+
 // wallCodes are the error codes a vendor gives a 429 for an account's
 // own token throughput used up, a bucket that refills slowly over minutes
 // (plugins#512, cycocyco): SenseTime Raccoon's user_model_rate_limited,
