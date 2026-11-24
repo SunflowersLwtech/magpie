@@ -690,9 +690,7 @@ func tell(f func()) {
 func Restart() {
 	// the next host loads the plugins as they are now: what this magpie
 	// installed is not another magpie's change (checkList)
-	listSeen.Lock()
-	listSeen.stamp, listSeen.set = listStamp(), true
-	listSeen.Unlock()
+	seeList(true)
 	hostMu.Lock()
 	h := current
 	current = nil
@@ -704,7 +702,12 @@ func Restart() {
 }
 
 // retireWait is how long a retired host may go on answering its calls.
-var retireWait = 10 * time.Minute
+// A model's one answer may run past ten minutes (a long rewrite on GLM
+// took 25), and a call still running when the wait ends is cut, its
+// tokens spent for nothing: an hour leaves such a call room, and a host
+// is replaced seldom enough (a plugin installed, updated or set) that
+// two or three of them finishing their calls side by side is the most.
+var retireWait = time.Hour
 
 // retiring are the hosts finishing their calls before they stop.
 var retiring = map[*host]bool{}
@@ -719,6 +722,7 @@ func (h *host) retire() {
 	hostMu.Lock()
 	retiring[h] = true
 	hostMu.Unlock()
+	log.Printf("plugin: the host was replaced; the %d call(s) it answers finish on it (at most %s)", len(h.slots), retireWait)
 	go func() {
 		defer func() {
 			hostMu.Lock()
@@ -732,6 +736,9 @@ func (h *host) retire() {
 				return
 			case <-time.After(250 * time.Millisecond):
 			}
+		}
+		if h.busy() {
+			log.Printf("plugin: a replaced host still answered %d call(s) after %s; it is stopped, and they with it", len(h.slots), retireWait)
 		}
 		h.stop()
 	}()

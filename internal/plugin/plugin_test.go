@@ -460,7 +460,9 @@ func TestPluginSignInProxy(t *testing.T) {
 // Plugins changed by another magpie (magpie plugin add or move in a
 // terminal while the app runs) reach the one running: its host starts
 // again with them, and meanwhile it knows the providers the other magpie
-// was told, where it went on without them until restarted.
+// was told, where it went on without them until restarted. The change is
+// one the host is handed (the plugin's options): a rewrite that changes
+// nothing the host loads leaves it as it is (TestMiddlewareOptionsLeaveTheHost).
 func TestPluginsChangedElsewhere(t *testing.T) {
 	sandbox(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -483,9 +485,11 @@ func TestPluginsChangedElsewhere(t *testing.T) {
 	if err := os.WriteFile(providersPath(), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l, _ := os.ReadFile(listPath())
+	l := Load()
+	l.Plugins[0].Options = map[string]any{"elsewhere": true}
+	b, _ = json.Marshal(l)
 	time.Sleep(10 * time.Millisecond)
-	if err := os.WriteFile(listPath(), append(l, '\n'), 0o600); err != nil {
+	if err := os.WriteFile(listPath(), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
