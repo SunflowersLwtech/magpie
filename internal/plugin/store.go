@@ -264,17 +264,63 @@ func save(l List) error {
 	if err := writeWhole(listPath(), append(b, '\n')); err != nil {
 		return err
 	}
-	listSeen.Lock()
-	listSeen.stamp, listSeen.set = listStamp(), true
-	listSeen.Unlock()
+	seeList(true)
 	return nil
 }
 
-// listSeen is plugins.json as this magpie last wrote or read it.
+// listSeen is plugins.json as this magpie last wrote or read it, and
+// what of it the host is handed (hostPart).
 var listSeen struct {
 	sync.Mutex
 	stamp string
+	host  string
 	set   bool
+}
+
+// seeList notes plugins.json as it is now as the one seen. The stamp is
+// read first: a change made between the two reads moves the stamp next
+// time, so it is looked at again, rather than taken as seen.
+func seeList(set bool) {
+	st := listStamp()
+	hp := hostPart()
+	listSeen.Lock()
+	listSeen.stamp, listSeen.host, listSeen.set = st, hp, set
+	listSeen.Unlock()
+}
+
+// hostPart is what of plugins.json the host loads, as text to compare:
+// every plugin's spec and switch, the options of each the host is handed
+// (startOn hands it none of a plugin all of which runs in magpie itself,
+// whose middleware reads its options again with plugins.json), and the
+// config and picks the host is given. A change to anything else leaves
+// the host as it is: a timer renewing a lease in a middleware's options
+// every two minutes (2026-11-24: 640 renewals a day) replaced the host
+// each time, and a request answered by a plugin was cut once the
+// replaced host's retireWait ran out.
+func hostPart() string {
+	l := Load()
+	type item struct {
+		Spec    string         `json:"spec"`
+		Off     bool           `json:"off,omitempty"`
+		Options map[string]any `json:"options,omitempty"`
+	}
+	items := make([]item, 0, len(l.Plugins))
+	for _, e := range l.Plugins {
+		it := item{Spec: e.Spec, Off: e.Off}
+		if !InMagpieOnly(Target(e.Spec)) {
+			it.Options = e.Options
+		}
+		items = append(items, it)
+	}
+	b, err := json.Marshal(struct {
+		Plugins []item            `json:"plugins"`
+		Config  map[string]any    `json:"config,omitempty"`
+		Prefer  map[string]string `json:"prefer,omitempty"`
+	}{items, l.Config, l.Prefer})
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // listStamp is plugins.json as it is now, and what is installed: bun's
@@ -292,6 +338,13 @@ func listStamp() string {
 	return b.String()
 }
 
+// installedPart is the part of a listStamp that is what bun installed:
+// all but plugins.json's own.
+func installedPart(stamp string) string {
+	_, rest, _ := strings.Cut(stamp, ";")
+	return rest
+}
+
 // hostStale is set when another magpie changed the plugins (magpie plugin
 // add, remove, update or move in a terminal while the app runs): the host
 // running has the old ones loaded.
@@ -303,10 +356,27 @@ var hostStale atomic.Bool
 func checkList() {
 	st := listStamp()
 	listSeen.Lock()
+	first := !listSeen.set
 	moved := listSeen.set && listSeen.stamp != st
+	prev, was := listSeen.stamp, listSeen.host
 	listSeen.stamp, listSeen.set = st, true
 	listSeen.Unlock()
-	if !moved {
+	if !first && !moved {
+		return
+	}
+	hp := hostPart()
+	listSeen.Lock()
+	if listSeen.stamp == st {
+		listSeen.host = hp
+	}
+	listSeen.Unlock()
+	if first {
+		return
+	}
+	if installedPart(st) == installedPart(prev) && was != "" && hp == was {
+		// only what runs in magpie itself changed (a middleware's
+		// options): the host has nothing of it, nor do the providers
+		// it lists
 		return
 	}
 	provMu.Lock()
@@ -693,6 +763,13 @@ func SetOptions(name string, opts map[string]any) error {
 	l.Plugins[i].Options = opts
 	if err := save(l); err != nil {
 		return err
+	}
+	if InMagpieOnly(Target(l.Plugins[i].Spec)) {
+		// the host is handed nothing of a plugin all of which runs in
+		// magpie (startOn), and its middleware reads the options again
+		// with plugins.json: replacing the host for them would only cut
+		// the calls it answers (hostPart)
+		return nil
 	}
 	Restart()
 	return nil
