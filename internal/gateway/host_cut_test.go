@@ -115,3 +115,65 @@ func TestPluginHostLostGoesOnToTheNextMemberAndRestsNobody(t *testing.T) {
 		}
 	}
 }
+
+// A request that waited for its lane's slot past hostCutAfter, then found
+// the plugin host gone at once, never reached the vendor: it is asked
+// again as any 502 is. The same wait followed by a host lost after a
+// while at the provider is still sent once (review on #4).
+func TestPluginHostLostAfterAQueueIsAskedAgain(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		lostAfter time.Duration // how long the second request runs at the vendor before its host is lost
+		again     bool
+	}{
+		{"queued a while, the host lost at once", 0, true},
+		{"queued a while, the host lost after a while", 150 * time.Millisecond, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			oldPause, oldCut := retryPause, hostCutAfter
+			retryPause, hostCutAfter = time.Millisecond, 80*time.Millisecond
+			t.Cleanup(func() { retryPause, hostCutAfter = oldPause, oldCut })
+			fresh(t)
+			var n atomic.Int32
+			first := make(chan struct{})
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				io.ReadAll(r.Body)
+				k := n.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				if k == 1 {
+					close(first)
+					time.Sleep(300 * time.Millisecond) // holds the provider's one slot
+					io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+					return
+				}
+				time.Sleep(c.lostAfter)
+				w.WriteHeader(http.StatusBadGateway)
+				io.WriteString(w, `{"type":"error","error":{"type":"api_error","message":"ZCode: writing to the plugin host: write |1: file already closed"}}`)
+			}))
+			t.Cleanup(up.Close)
+			one := 1
+			if err := provider.Save(provider.Provider{ID: "z", Name: "ZCode", Key: "k", Models: []string{"m"}, Anthropic: up.URL, MaxConcurrency: &one}); err != nil {
+				t.Fatal(err)
+			}
+			h := New().Handler()
+			send := func() (int, string) {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"z/m","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`)))
+				return rec.Code, rec.Body.String()
+			}
+			done := make(chan int, 1)
+			go func() { code, _ := send(); done <- code }()
+			<-first
+			code, body := send()
+			if c1 := <-done; c1 != http.StatusOK {
+				t.Fatalf("the first request got %d, want 200", c1)
+			}
+			if code != http.StatusBadGateway {
+				t.Fatalf("the queued request got %d (%s), want the 502", code, body)
+			}
+			if second := n.Load() - 1; c.again && second < 2 || !c.again && second != 1 {
+				t.Errorf("the queued request was sent %d time(s), want it asked again %v", second, c.again)
+			}
+		})
+	}
+}

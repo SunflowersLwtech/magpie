@@ -1644,7 +1644,10 @@ func passing(status int, header http.Header, body []byte, again int) (time.Durat
 
 // hostCutAfter is how long a try has run when a plugin host lost under
 // it is no longer asked again: one lost at once (a host that died as it
-// started) is, as before.
+// started) is, as before. The time it waited for a slot in its lane (the
+// try's Queued) is not running: a request queued behind a provider's
+// maxConcurrency calls and then refused by a host already gone never
+// reached the vendor (review on #4).
 var hostCutAfter = time.Minute
 
 // hostLostWords are the plugin host's own words for a host lost under a
@@ -1652,8 +1655,9 @@ var hostCutAfter = time.Minute
 // which a plugin's failed request reaches the gateway with.
 var hostLostWords = regexp.MustCompile(`writing to the plugin host|the plugin host quit|the plugin host is gone`)
 
-// hostCut says whether a try that ran ran failed for its plugin host
-// lost under it after hostCutAfter.
+// hostCut says whether a try that ran ran (its time at the provider,
+// past its lane's queue) failed for its plugin host lost under it after
+// hostCutAfter.
 func hostCut(body []byte, ran time.Duration) bool {
 	return ran >= hostCutAfter && hostLostWords.Match(body)
 }
