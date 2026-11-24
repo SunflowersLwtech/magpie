@@ -3653,7 +3653,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, from provider.Pro
 		// ten minutes and more, each tried three times and every try
 		// charged). No account's fault: none rests, and another provider
 		// left is asked, as for no room
-		cut := hw.failed() && hostCut(hw.errBody(), time.Duration(try.Millis)*time.Millisecond)
+		cut := hw.failed() && hostCut(hw.errBody(), time.Duration(try.Millis-try.Queued)*time.Millisecond)
 		if protected || zdr || noRoom || cut {
 			if other == nil {
 				other = &Try{Status: call.Status, Error: call.Error}
