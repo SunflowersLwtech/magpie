@@ -277,16 +277,26 @@ var listSeen struct {
 	set   bool
 }
 
-// seeList notes plugins.json as it is now as the one seen. The stamp is
-// read first: a change made between the two reads moves the stamp next
-// time, so it is looked at again, rather than taken as seen.
+// seeList notes plugins.json as it is now as the one seen. A write that
+// lands between its reads (another magpie's) would have its plugins in
+// hp under the stamp from before it: the next look sees the stamp move,
+// finds hp the same, and leaves the host without that change. So the
+// stamp is read again, and when it moved nothing of what the host loads
+// is taken as seen: the next look replaces the host (review on #4).
 func seeList(set bool) {
 	st := listStamp()
-	hp := hostPart()
+	hp := hostPartOf()
+	if listStamp() != st {
+		hp = ""
+	}
 	listSeen.Lock()
 	listSeen.stamp, listSeen.host, listSeen.set = st, hp, set
 	listSeen.Unlock()
 }
+
+// hostPartOf is hostPart; a test lands a write between seeList's reads
+// through it.
+var hostPartOf = hostPart
 
 // hostPart is what of plugins.json the host loads, as text to compare:
 // every plugin's spec and switch, the options of each the host is handed

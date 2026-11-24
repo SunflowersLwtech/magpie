@@ -145,3 +145,27 @@ func TestSetOptionsOfAMiddlewareLeavesTheHost(t *testing.T) {
 		t.Fatal("this magpie's own restart was taken for another magpie's change")
 	}
 }
+
+// Another magpie's write that lands between seeList's two reads is not
+// taken as seen: its plugin's options would be in what seeList keeps of
+// the host, under the stamp from before the write, and the next look
+// would leave the host running without them (review on #4).
+func TestAWriteBetweenSeeListsReadsReplacesTheHost(t *testing.T) {
+	_, write := keepSandbox(t)
+	write(`{"plugins":[{"spec":"@magpie-community/opencode-zcode-auth"},{"spec":"MW","options":{"seatUntil":1}}]}`)
+	checkList()
+	hostStale.Store(false)
+
+	was := hostPartOf
+	t.Cleanup(func() { hostPartOf = was })
+	hostPartOf = func() string {
+		hostPartOf = was
+		write(`{"plugins":[{"spec":"@magpie-community/opencode-zcode-auth","options":{"x":1}},{"spec":"MW","options":{"seatUntil":1}}]}`)
+		return was()
+	}
+	seeList(true)
+	checkList()
+	if !hostStale.Swap(false) {
+		t.Fatal("another magpie gave the host's plugin options between seeList's reads, and the host was not replaced")
+	}
+}
