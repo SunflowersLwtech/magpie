@@ -3645,7 +3645,16 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, from provider.Pro
 		// for the same room, so none rests, none is asked next, nor this
 		// one again after a moment. Another provider left is asked
 		noRoom := hw.failed() && claudeNoRoom(hw.code(), hw.errBody())
-		if protected || zdr || noRoom {
+		// the plugin host was lost under a call that had run a while
+		// (replaced while it answered and stopped once its wait ran out,
+		// or dead): asked again, the vendor would be sent the whole
+		// request once more, and charge for it once more, with nothing to
+		// say the host lasts longer this time (2026-11-24: GLM rewrites of
+		// ten minutes and more, each tried three times and every try
+		// charged). No account's fault: none rests, and another provider
+		// left is asked, as for no room
+		cut := hw.failed() && hostCut(hw.errBody(), time.Duration(try.Millis-try.Queued)*time.Millisecond)
+		if protected || zdr || noRoom || cut {
 			if other == nil {
 				other = &Try{Status: call.Status, Error: call.Error}
 			}
@@ -3655,7 +3664,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, from provider.Pro
 				left = notMates(cands[i+1:], c)
 			}
 			if len(left) > 0 {
-				if !noRoom {
+				if !noRoom && !cut {
 					try.Fail = failShape
 				}
 				s.trace.update(tr, func(t *Route) { t.Tries[len(t.Tries)-1] = try })
@@ -3667,7 +3676,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, from provider.Pro
 			last = true
 		}
 		// nor is it asked again after a moment
-		protected = protected || zdr || noRoom
+		protected = protected || zdr || noRoom || cut
 		if wait, ok := passing(hw.code(), hw.header, hw.errBody(), again); ok && !protected && !last && hw.failed() && spentAfter(cands[i+1:]) {
 			// the others left are out of their allowance (Discord, waroy: a
 			// Codex account run out, Grok busy a moment): this one is the
